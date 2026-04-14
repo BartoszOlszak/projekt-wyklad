@@ -3,7 +3,7 @@ import numpy as np
 import os
 import glob
 
-def process_images(zdjecia, wynik):
+def wytnij_zdjecia(zdjecia, wynik):
     # Tworzy folder wynikowy, jeśli jeszcze nie istnieje
     if not os.path.exists(wynik):
         os.makedirs(wynik)
@@ -85,4 +85,4 @@ def process_images(zdjecia, wynik):
 zdjecia = 'zdjecia'
 wynik = 'wynik'
 
-process_images(zdjecia, wynik)
+wytnij_zdjecia(zdjecia, wynik)
