@@ -24,13 +24,17 @@ def process_images(zdjecia, wynik):
         hsv = cv2.cvtColor(zdjecie, cv2.COLOR_BGR2HSV)
 
         # Definicja zakresów koloru czerwonego (czerwień jest na obu końcach skali H)
-        czerwony11 = np.array([0, 70, 50])
+        czerwony11 = np.array([0, 40, 40])
         czerwony12 = np.array([10, 255, 255])
-        czerwony21 = np.array([170, 70, 50])
+        czerwony21 = np.array([170, 40, 40])
         czerwony22 = np.array([180, 255, 255])
 
         # Tworzenie maski binarnej (białe tam gdzie czerwone, reszta czarna)
         maska = cv2.inRange(hsv, czerwony11, czerwony12) + cv2.inRange(hsv, czerwony21, czerwony22)
+
+        kernel = np.ones((5, 5), np.uint8)
+        maska = cv2.dilate(maska, kernel, iterations=1)
+        maska = cv2.morphologyEx(maska, cv2.MORPH_CLOSE, kernel)
 
         # Wykrywanie konturów (płaska lista wszystkich znalezionych kształtów)
         ramki, _ = cv2.findContours(maska, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -46,21 +50,21 @@ def process_images(zdjecia, wynik):
             pole = cv2.contourArea(ramka)
 
             # FILTRY ODRZUCAJĄCE BŁĘDNE WYNIKI:
-            # Zbyt małe pole powierzchni (szum)
-            if pole < 400:
+            # Zbyt małe pole powierzchni
+            if pole < 300:
                 continue
 
-            # Zbyt duże obiekty (np. krawędzie kartki)
-            if w > zdj_w * 0.5 or h > zdj_h * 0.5:
+            # Zbyt duże obiekty
+            if w > zdj_w * 0.6 or h > zdj_h * 0.6:
                 continue
 
             # Obiekty o nienaturalnie małych wymiarach
-            if w < 50 or h < 25:
+            if w < 40 or h < 20:
                 continue
 
             # Filtr proporcji (odrzuca pionowe kreski i zbyt długie pasy)
             proporcje = float(w) / h
-            if proporcje < 1.2 or proporcje > 10:
+            if proporcje < 1.1 or proporcje > 6:
                 continue
 
             # Obliczanie współrzędnych z marginesem 5px i blokadą wyjścia poza obraz
