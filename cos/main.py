@@ -7,7 +7,7 @@ from google import genai
 from PIL import Image
 import time
 
-client = genai.Client(api_key="TWÓJ_KLUCZ_API") # tutaj dajemy klucz api do google AI studio
+client = genai.Client(api_key="AIzaSyASYhHx5tLMPEnDFKMUju8IGrjY5sxnGFE")  # tutaj dajemy klucz api do google AI studio
 
 
 def wytnij_zdjecia(zdjecia, wynik):
@@ -22,9 +22,13 @@ def wytnij_zdjecia(zdjecia, wynik):
         return
 
     # Lista na ostateczne, odczytane teksty do zapisania w Excelu
-    dane_do_excela = []
+    dane_excel_1 = []
+    dane_excel_2 = []
+
     # Tymczasowy "koszyk" na wycięte zdjęcia, z którego zrobimy siatkę
     paczka_obrazkow = []
+    paczka_metadane = []
+    globalny_licznik = 1
 
     for sciezka in sciezki:
         # Wczytanie zdjęcia z dysku
@@ -55,7 +59,6 @@ def wytnij_zdjecia(zdjecia, wynik):
 
         # Przygotowanie nazwy bazowej pliku do zapisu wyników
         nazwa = os.path.splitext(os.path.basename(sciezka))[0]
-        licznik = 0
         zdj_h, zdj_w = zdjecie.shape[:2]
 
         for ramka in ramki:
@@ -95,57 +98,79 @@ def wytnij_zdjecia(zdjecia, wynik):
             pil_img = Image.fromarray(rgb_crop)
             # Wrzuć wycięte słowo do koszyka oczekującego na wysłanie
             paczka_obrazkow.append(pil_img)
+            paczka_metadane.append(str(globalny_licznik))
 
             # Fizyczny zapis wycinka na dysku w folderze 'wynik'
-            nazwa_wyniku = f"{nazwa}_crop_{licznik}.jpg"
+            nazwa_wyniku = f"{globalny_licznik}.jpg"
             sciezka_wyniku = os.path.join(wynik, nazwa_wyniku)
             cv2.imwrite(sciezka_wyniku, wyciety)
 
-            licznik += 1
+            globalny_licznik += 1
 
             # --- GŁÓWNY SYSTEM SIATKI ---
-            # Kiedy koszyk uzbiera 60 obrazków, zaczynamy proces sklejania
-            if len(paczka_obrazkow) >= 60:
+            # Kiedy koszyk uzbiera 100 obrazków, zaczynamy proces sklejania
+            if len(paczka_obrazkow) >= 100:
                 # Szukamy największej szerokości i wysokości w paczce, żeby wyrównać komórki siatki
                 max_w = max(img.width for img in paczka_obrazkow)
                 max_h = max(img.height for img in paczka_obrazkow)
 
-                # Ustawiamy 6 kolumn, a wiersze wyliczamy na podstawie liczby obrazków
-                kolumny = 6
+                kolumny = 10
                 wiersze = (len(paczka_obrazkow) + kolumny - 1) // kolumny
 
-                # Tworzymy ogromne, czyste, białe płótno (naszą siatkę)
                 siatka = Image.new('RGB', (kolumny * max_w, wiersze * max_h), color='white')
 
-                # Wklejamy poszczególne słowa na odpowiednie miejsca siatki (jak kafelki)
+                # Wklejamy poszczególne słowa na odpowiednie miejsca siatki
                 for idx, img in enumerate(paczka_obrazkow):
                     pos_x = (idx % kolumny) * max_w
                     pos_y = (idx // kolumny) * max_h
                     siatka.paste(img, (pos_x, pos_y))
 
                 try:
-                    # Wysyłamy do AI tylko JEDNO zdjęcie (całą siatkę) zamiast 60 małych
-                    prompt = "Na obrazku jest siatka wyciętych, odręcznych słów. Odczytaj wszystkie słowa po kolei, czytając wierszami od lewej do prawej. Zwróć tylko listę odczytanych słów, każde w nowej linijce. Nie dodawaj nic od siebie."
+                    # Wysyłamy do AI tylko całą siatkę zamiast małych
+                    prompt = f"Na obrazku jest siatka wyciętych, odręcznych słów. Komórek jest dokładnie {len(paczka_obrazkow)}. Odczytaj wszystkie słowa po kolei, czytając wierszami od lewej do prawej. Zwróć dokładnie {len(paczka_obrazkow)} linijek, po jednej dla każdego słowa. Jeśli w jakiejś komórce nie rozpoznajesz słowa lub jest pusta, wpisz znak '-'. ZACZNIJ ODPOWIEDŹ BEZPOŚREDNIO OD PIERWSZEGO SŁOWA. Nie używaj żadnych zdań wstępnych, nie pisz 'Oto lista', nie dodawaj nic od siebie."
                     response = client.models.generate_content(
                         model='gemini-2.5-flash',
                         contents=[prompt, siatka]
                     )
+
                     # Odbieramy długi tekst, dzielimy go na linijki
                     tekst = response.text.strip().split('\n')
+                    tekst = [t.strip() for t in tekst if t.strip()]
 
-                    for t in tekst:
+                    if tekst and (":" in tekst[0] or len(tekst[0].split()) > 3):
+                        tekst = tekst[1:]
+
+                    while len(tekst) < len(paczka_metadane):
+                        tekst.append('-')
+                    tekst = tekst[:len(paczka_metadane)]
+
+                    # Filtr śmieciowy - odrzuca znaki interpunkcyjne potraktowane jako słowa
+                    for m, t in zip(paczka_metadane, tekst):
                         oczyszczony = t.strip()
-                        # Filtr śmieciowy - odrzuca znaki interpunkcyjne potraktowane jako słowa
-                        if oczyszczony and oczyszczony not in ['-', '--', '_', '.', ',', '|']:
-                            dane_do_excela.append(oczyszczony)
-                            print(f"Rozpoznano z siatki: {oczyszczony}")
+
+                        if oczyszczony:
+                            oczyszczony = oczyszczony.split()[0]
+
+                        if not oczyszczony or oczyszczony in ['--', '_', '.', ',', '|'] or oczyszczony.lower() in ['2m',
+                                                                                                                   'zm']:
+                            oczyszczony = '-'
+
+                        dane_excel_2.append([m, oczyszczony])
+
+                        if oczyszczony != '-':
+                            dane_excel_1.append([m, oczyszczony])
+                            print(f"Rozpoznano z siatki (Plik: {m}): {oczyszczony}")
+                        else:
+                            print(f"Nie rozpoznano słowa (Plik: {m})")
+
                 except Exception as e:
                     print(f"Błąd API: {e}")
 
-                # Czyścimy koszyk, żeby zbierać kolejną partię 60 słów
+                # Czyścimy koszyk, żeby zbierać kolejną partię słów
                 paczka_obrazkow = []
-                # Odczekaj 15 sekund przed wysłaniem kolejnej paczki, aby nie spamować serwera
-                time.sleep(15)
+                paczka_metadane = []
+
+                time.sleep(35)
 
     # --- CZYSZCZENIE RESZTEK ---
     # Ten blok wykonuje się po zakończeniu wszystkich zdjęć
@@ -154,7 +179,7 @@ def wytnij_zdjecia(zdjecia, wynik):
         max_w = max(img.width for img in paczka_obrazkow)
         max_h = max(img.height for img in paczka_obrazkow)
 
-        kolumny = 6
+        kolumny = 10
         wiersze = (len(paczka_obrazkow) + kolumny - 1) // kolumny
 
         siatka = Image.new('RGB', (kolumny * max_w, wiersze * max_h), color='white')
@@ -165,27 +190,50 @@ def wytnij_zdjecia(zdjecia, wynik):
             siatka.paste(img, (pos_x, pos_y))
 
         try:
-            prompt = "Na obrazku jest siatka wyciętych, odręcznych słów. Odczytaj wszystkie słowa po kolei, czytając wierszami od lewej do prawej. Zwróć tylko listę odczytanych słów, każde w nowej linijce. Nie dodawaj nic od siebie."
+            prompt = f"Na obrazku jest siatka wyciętych, odręcznych słów. Komórek jest dokładnie {len(paczka_obrazkow)}. Odczytaj wszystkie słowa po kolei, czytając wierszami od lewej do prawej. Zwróć dokładnie {len(paczka_obrazkow)} linijek, po jednej dla każdego słowa. Jeśli w jakiejś komórce nie rozpoznajesz słowa lub jest pusta, wpisz znak '-'. ZACZNIJ ODPOWIEDŹ BEZPOŚREDNIO OD PIERWSZEGO SŁOWA. Nie używaj żadnych zdań wstępnych, nie pisz 'Oto lista', nie dodawaj nic od siebie."
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-2.5-pro',
                 contents=[prompt, siatka]
             )
             tekst = response.text.strip().split('\n')
-            for t in tekst:
+            tekst = [t.strip() for t in tekst if t.strip()]
+
+            if tekst and (":" in tekst[0] or len(tekst[0].split()) > 3):
+                tekst = tekst[1:]
+
+            while len(tekst) < len(paczka_metadane):
+                tekst.append('-')
+            tekst = tekst[:len(paczka_metadane)]
+
+            for m, t in zip(paczka_metadane, tekst):
                 oczyszczony = t.strip()
-                if oczyszczony and oczyszczony not in ['-', '--', '_', '.', ',', '|']:
-                    dane_do_excela.append(oczyszczony)
-                    print(f"Rozpoznano z siatki: {oczyszczony}")
+
+                if oczyszczony:
+                    oczyszczony = oczyszczony.split()[0]
+
+                if not oczyszczony or oczyszczony in ['--', '_', '.', ',', '|'] or oczyszczony.lower() in ['2m', 'zm']:
+                    oczyszczony = '-'
+
+                dane_excel_2.append([m, oczyszczony])
+
+                if oczyszczony != '-':
+                    dane_excel_1.append([m, oczyszczony])
+                    print(f"Rozpoznano z siatki (Plik: {m}): {oczyszczony}")
+                else:
+                    print(f"Nie rozpoznano słowa (Plik: {m})")
         except Exception as e:
             print(f"Błąd API: {e}")
 
     # Zapis całego odczytanego tekstu do pliku Excel
-    if dane_do_excela:
-        df = pd.DataFrame(dane_do_excela, columns=['Rozpoznany Tekst'])
-        df.to_excel('wynikexcel.xlsx', index=False, header=False)
-        print("Utworzono plik wynikexcel.xlsx")
-    else:
-        print("Nie rozpoznano żadnych słów, więc plik wynikexcel.xlsx nie został utworzony.")
+    if dane_excel_1:
+        df1 = pd.DataFrame(dane_excel_1, columns=['Plik', 'Rozpoznany Tekst'])
+        df1.to_excel('wynikexcel_rozpoznane.xlsx', index=False)
+        print("Utworzono plik wynikexcel_rozpoznane.xlsx")
+
+    if dane_excel_2:
+        df2 = pd.DataFrame(dane_excel_2, columns=['Plik', 'Rozpoznany Tekst'])
+        df2.to_excel('wynikexcel_wszystkie.xlsx', index=False)
+        print("Utworzono plik wynikexcel_wszystkie.xlsx")
 
 
 # Ścieżki do folderów wejścia i wyjścia
